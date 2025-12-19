@@ -1,0 +1,12 @@
+target/
+**/target/
+**/.DS_Store
+*.log
+
+# Local data and generated artifacts
+/data/
+/data/**
+
+# IDE/editors
+.vscode/
+.idea/

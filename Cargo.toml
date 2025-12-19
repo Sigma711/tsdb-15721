@@ -1,0 +1,34 @@
+[workspace]
+members = [
+    "crates/common",
+    "crates/datamodel",
+    "crates/encoding",
+    "crates/storage",
+    "crates/index",
+    "crates/exec",
+    "crates/optimizer",
+    "crates/planner",
+    "crates/server",
+    "labs/lab01_chunk",
+    "labs/lab02_encoding",
+    "labs/lab03_vector",
+    "labs/lab04_agg",
+    "labs/lab05_join",
+    "labs/lab06_opt_rule",
+    "labs/lab07_opt_cost",
+    "labs/lab08_skew",
+    "labs/lab09_compaction",
+    "labs/lab10_dist_exec",
+    "labs/lab11_fault",
+    "labs/lab12_project",
+    "tools/gen_data",
+    "tools/inspect_chunk",
+    "tools/flame",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
