@@ -13,4 +13,12 @@ impl RecordBatch {
     pub fn is_empty(&self) -> bool {
         self.ts.is_empty()
     }
+
+    pub fn slice(&self, range: std::ops::Range<usize>) -> RecordBatch {
+        RecordBatch {
+            ts: self.ts[range.clone()].to_vec(),
+            series_id: self.series_id[range.clone()].to_vec(),
+            value: self.value[range].to_vec(),
+        }
+    }
 }

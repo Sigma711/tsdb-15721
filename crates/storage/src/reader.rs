@@ -14,27 +14,129 @@ pub struct ChunkFile {
     file: File,
 }
 
+impl ChunkFile {
+    pub fn read_ts_at(&mut self, idx: usize) -> Result<i64> {
+        if idx >= self.meta.row_count as usize {
+            return Err(Error::Corrupt("ts index out of bounds".into()));
+        }
+        let ts_col = self
+            .meta
+            .cols
+            .iter()
+            .find(|col| col.col_id == 0)
+            .ok_or_else(|| Error::Corrupt("missing ts column".into()))?;
+        if ts_col.encoding != 0 {
+            return Err(Error::Unsupported("unsupported encoding".into()));
+        }
+
+        let pos = ts_col
+            .offset
+            .checked_add((idx as u64) * 8)
+            .ok_or_else(|| Error::Corrupt("ts offset overflow".into()))?;
+        self.file.seek(SeekFrom::Start(pos))?;
+        let mut buf = [0u8; 8];
+        self.file.read_exact(&mut buf)?;
+        Ok(i64::from_le_bytes(buf))
+    }
+
+    pub fn read_range_i64(&mut self, col_id: u16, start: usize, end: usize) -> Result<Vec<i64>> {
+        let col = self.find_col(col_id)?.clone();
+        if col.encoding != 0 {
+            return Err(Error::Unsupported("unsupported encoding".into()));
+        }
+        let buf = self.read_range_bytes(&col, start, end, 8)?;
+        let mut out = Vec::with_capacity(buf.len() / 8);
+        for chunk in buf.chunks_exact(8) {
+            out.push(i64::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        Ok(out)
+    }
+
+    pub fn read_range_u32(&mut self, col_id: u16, start: usize, end: usize) -> Result<Vec<u32>> {
+        let col = self.find_col(col_id)?.clone();
+        if col.encoding != 0 {
+            return Err(Error::Unsupported("unsupported encoding".into()));
+        }
+        let buf = self.read_range_bytes(&col, start, end, 4)?;
+        let mut out = Vec::with_capacity(buf.len() / 4);
+        for chunk in buf.chunks_exact(4) {
+            out.push(u32::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        Ok(out)
+    }
+
+    pub fn read_range_f64(&mut self, col_id: u16, start: usize, end: usize) -> Result<Vec<f64>> {
+        let col = self.find_col(col_id)?.clone();
+        if col.encoding != 0 {
+            return Err(Error::Unsupported("unsupported encoding".into()));
+        }
+        let buf = self.read_range_bytes(&col, start, end, 8)?;
+        let mut out = Vec::with_capacity(buf.len() / 8);
+        for chunk in buf.chunks_exact(8) {
+            out.push(f64::from_le_bytes(chunk.try_into().unwrap()));
+        }
+        Ok(out)
+    }
+
+    fn find_col(&self, col_id: u16) -> Result<&ColumnMeta> {
+        self.meta
+            .cols
+            .iter()
+            .find(|col| col.col_id == col_id)
+            .ok_or_else(|| Error::Corrupt("missing column".into()))
+    }
+
+    fn read_range_bytes(
+        &mut self,
+        col: &ColumnMeta,
+        start: usize,
+        end: usize,
+        width: usize,
+    ) -> Result<Vec<u8>> {
+        if start > end {
+            return Err(Error::Corrupt("range start > end".into()));
+        }
+        let row_count = self.meta.row_count as usize;
+        if end > row_count {
+            return Err(Error::Corrupt("range end out of bounds".into()));
+        }
+        let end_bytes = end
+            .checked_mul(width)
+            .ok_or_else(|| Error::Corrupt("range byte overflow".into()))?;
+        if end_bytes as u64 > col.len {
+            return Err(Error::Corrupt("range exceeds column length".into()));
+        }
+        let start_bytes = start
+            .checked_mul(width)
+            .ok_or_else(|| Error::Corrupt("range byte overflow".into()))?;
+        let byte_len = end_bytes
+            .checked_sub(start_bytes)
+            .ok_or_else(|| Error::Corrupt("range byte underflow".into()))?;
+
+        let offset = col
+            .offset
+            .checked_add(start_bytes as u64)
+            .ok_or_else(|| Error::Corrupt("range offset overflow".into()))?;
+        self.file.seek(SeekFrom::Start(offset))?;
+        let mut buf = vec![0u8; byte_len];
+        if !buf.is_empty() {
+            self.file.read_exact(&mut buf)?;
+        }
+        Ok(buf)
+    }
+}
+
 pub fn open_chunk(path: &Path) -> Result<ChunkFile> {
     let mut file = File::open(path)?;
     let header = format::read_header(&mut file)?;
-    if header.meta_len == 0 {
-        return Err(Error::Corrupt("meta_len is zero".into()));
-    }
-
-    let meta_len =
-        usize::try_from(header.meta_len).map_err(|_| Error::Corrupt("meta_len overflow".into()))?;
-    let mut meta_buf = vec![0u8; meta_len];
-    file.read_exact(&mut meta_buf)?;
-
-    let mut hasher = Hasher::new();
-    hasher.update(&meta_buf);
-    let expected_crc = hasher.finalize();
-    if expected_crc != header.meta_crc32 {
-        return Err(Error::Corrupt("meta crc mismatch".into()));
-    }
-
-    let meta = crate::meta::decode_meta(&meta_buf)?;
+    let meta = read_meta(&mut file, &header)?;
     Ok(ChunkFile { meta, file })
+}
+
+pub fn open_meta(path: &Path) -> Result<ChunkMeta> {
+    let mut file = File::open(path)?;
+    let header = format::read_header(&mut file)?;
+    read_meta(&mut file, &header)
 }
 
 pub fn read_batch(chunk: &mut ChunkFile) -> Result<RecordBatch> {
@@ -74,6 +176,26 @@ pub fn read_batch(chunk: &mut ChunkFile) -> Result<RecordBatch> {
         series_id,
         value,
     })
+}
+
+fn read_meta(file: &mut File, header: &format::Header) -> Result<ChunkMeta> {
+    if header.meta_len == 0 {
+        return Err(Error::Corrupt("meta_len is zero".into()));
+    }
+
+    let meta_len =
+        usize::try_from(header.meta_len).map_err(|_| Error::Corrupt("meta_len overflow".into()))?;
+    let mut meta_buf = vec![0u8; meta_len];
+    file.read_exact(&mut meta_buf)?;
+
+    let mut hasher = Hasher::new();
+    hasher.update(&meta_buf);
+    let expected_crc = hasher.finalize();
+    if expected_crc != header.meta_crc32 {
+        return Err(Error::Corrupt("meta crc mismatch".into()));
+    }
+
+    crate::meta::decode_meta(&meta_buf)
 }
 
 fn meta_total_len(meta: &ChunkMeta) -> usize {

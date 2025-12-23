@@ -32,6 +32,11 @@ version = "0.1.0"
 [[package]]
 name = "exec"
 version = "0.1.0"
+dependencies = [
+ "common",
+ "datamodel",
+ "storage",
+]
 
 [[package]]
 name = "flame"
@@ -55,6 +60,7 @@ version = "0.1.0"
 dependencies = [
  "common",
  "datamodel",
+ "exec",
  "storage",
 ]
 

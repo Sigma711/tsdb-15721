@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 struct Field {
     name: String,
     dtype: DataType,
