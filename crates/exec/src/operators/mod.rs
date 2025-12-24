@@ -1,4 +1,5 @@
 pub mod filter;
+pub mod agg_downsample;
 pub mod project;
 pub mod scan;
 

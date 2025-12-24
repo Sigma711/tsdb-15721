@@ -5,3 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+common = { path = "../../crates/common" }
+datamodel = { path = "../../crates/datamodel" }
+storage = { path = "../../crates/storage" }
+exec = { path = "../../crates/exec" }
